@@ -1,0 +1,35 @@
+{
+	"name": "@pepe-team/bridge-widget-embedder",
+	"version": "0.1.3",
+	"main": "./build/index.js",
+	"scripts": {
+		"build": "tsc --build",
+		"clean": "tsc --build --clean",
+		"check": "echo '\"check\" is unneeded'",
+		"test": "echo 'There is no tests yet'",
+		"test-e2e": "echo 'There is no e2e tests yet'",
+		"lint": "prettier --plugin-search-dir . --check src && eslint src",
+		"format": "prettier --plugin-search-dir . --write src",
+		"prepare": "tsc --build"
+	},
+	"lint-staged": {
+		"*.(js|ts)": [
+			"prettier --plugin-search-dir . --check src",
+			"eslint src"
+		]
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.25.0",
+		"@typescript-eslint/eslint-plugin": "^5.27.0",
+		"@typescript-eslint/parser": "^5.27.0",
+		"eslint": "^8.16.0",
+		"eslint-config-prettier": "^8.3.0",
+		"husky": "^8.0.1",
+		"lint-staged": "^13.0.3",
+		"prettier": "^2.6.2",
+		"typescript": "^4.7.4"
+	},
+	"dependencies": {
+		"js-event-bus": "^1.1.1"
+	}
+}

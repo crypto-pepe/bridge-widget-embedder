@@ -1,0 +1,6 @@
+.husky/
+node_modules/
+src/
+
+.gitlab-ci.yml
+playwright.config.ts
