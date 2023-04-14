@@ -1,73 +1,60 @@
+import BigNumber from '@waves/bignumber';
 import EventBus from 'js-event-bus';
 import {
 	CreateIframeArgs,
 	Nullable,
 	PrefillData,
 	WidgetArgs,
-	IframeEvent,
 	Colors,
-	EventKind,
-	Message
+	Message,
+	IncomingMessageKind,
+	OutgoingMessageKind
 } from './types';
 
 export class BridgeWidget {
-	host: Nullable<HTMLElement> = null;
-	iframe: Nullable<Window> = null;
-	iframeName: Nullable<string> = null;
-	iframeUrl: Nullable<string> = null;
-	eventBus: EventBus;
+	private host: Nullable<HTMLElement> = null;
+	private iframe: Nullable<Window> = null;
+	private iframeName: Nullable<string> = null;
+	private iframeUrl: Nullable<string> = null;
+	private eventBus: EventBus;
+
+	private lastMessageId = 0;
 
 	constructor() {
 		this.eventBus = new EventBus();
 	}
 
-	on(eventKind: EventKind, callback: (message?: Message) => void) {
+	on = <E extends IncomingMessageKind>(eventKind: E, callback: (message: Message<E>) => void) => {
 		this.eventBus.on(eventKind, callback);
-	}
+	};
 
-	prefill(prefillData: PrefillData): string {
-		const data: Partial<Record<keyof PrefillData, object | string | number>> = {
-			...prefillData
-		};
-
-		if (prefillData.ext_signing_chains) {
-			data.ext_signing_chains = prefillData.ext_signing_chains?.join(',');
-		}
-
-		const prefillEntries = Object.entries(data);
-		const queryparams = prefillEntries
-			.filter(([, value]) => value)
-			.map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : value}`)
-			.join('&');
-		if (queryparams.length > 0) {
-			return `?${queryparams}`;
-		}
-		return '';
-	}
-
-	createIframe({ iframeUrl, width, height, name }: CreateIframeArgs): HTMLIFrameElement {
-		const el = document.createElement('iframe');
-		el.setAttribute('name', name);
-		el.setAttribute('src', iframeUrl);
-		el.setAttribute('width', width || '100%');
-		el.setAttribute('height', height || '100%');
-		el.setAttribute('frameborder', '0');
-		el.setAttribute('style', 'min-width:320px;min-height:320px;display:block;');
-		return el;
-	}
-
-	setColorScheme(colors: Colors) {
-		if (this.iframe) {
-			this.iframe.postMessage({
-				name: IframeEvent.ChangeColors,
-				data: { ...colors }
-			});
+	sendMessage = <K extends OutgoingMessageKind>(message: Message<K>) => {
+		if (this.iframe && this.iframeUrl) {
+			this.iframe.postMessage(message, this.iframeUrl);
 		} else {
 			throw Error('Widget is not loaded');
 		}
-	}
+	};
 
-	run(args: WidgetArgs) {
+	setColorScheme = (colors: Partial<Colors>) => {
+		const mid = ++this.lastMessageId;
+		this.sendMessage({
+			mid,
+			kind: OutgoingMessageKind.SetColorSchema,
+			payload: colors
+		});
+	};
+
+	setAmount = (amount: BigNumber | number | string) => {
+		const mid = ++this.lastMessageId;
+		this.sendMessage({
+			mid,
+			kind: OutgoingMessageKind.SetAmount,
+			payload: amount.toString()
+		});
+	};
+
+	run = (args: WidgetArgs) => {
 		const {
 			host,
 			name,
@@ -80,7 +67,9 @@ export class BridgeWidget {
 			ext_signing_chains,
 			source_chain_id,
 			target_chain_id,
-			token
+			token,
+			amount,
+			activeTab
 		} = args;
 
 		this.host = host;
@@ -94,7 +83,9 @@ export class BridgeWidget {
 			color_schema,
 			source_chain_id,
 			target_chain_id,
-			token
+			token,
+			amount,
+			activeTab
 		});
 
 		const iframe = this.createIframe({
@@ -104,22 +95,58 @@ export class BridgeWidget {
 			name
 		});
 
-		host.append(iframe);
+		this.host.append(iframe);
 		this.iframe = (window.frames as Record<string, any>)[this.iframeName];
-		window.addEventListener('message', this.onMessageReceive);
-	}
 
-	onMessageReceive = ({ data }: MessageEvent<Message>) => {
-		this.eventBus.emit(data.kind, null, data);
+		window.addEventListener('message', this.handleMessage);
 	};
 
-	sendMessage(message: Message) {
-		if (this.iframe && this.iframeUrl) {
-			this.iframe.postMessage(message, this.iframeUrl);
+	destroy = () => {
+		this.eventBus.detachAll();
+	};
+
+	private prefill(prefillData: PrefillData): string {
+		const data = {
+			...prefillData
+		};
+
+		const prefillEntries = Object.entries(data);
+		const queryparams = prefillEntries
+			.filter(([, value]) => value)
+			.reduce<[string, string][]>((acc, [key, value]) => {
+				if (BigNumber.isBigNumber(value)) {
+					acc.push([key, value.toString()]);
+				} else if (Array.isArray(value)) {
+					value.forEach((v) => {
+						acc.push([`${key}[]`, v.toString()]);
+					});
+				} else if (typeof value === 'object') {
+					acc.push([key, encodeURIComponent(JSON.stringify(value))]);
+				} else {
+					acc.push([key, value.toString()]);
+				}
+				return acc;
+			}, [])
+			.map((kv) => kv.join('='))
+			.join('&');
+		if (queryparams.length > 0) {
+			return `?${queryparams}`;
 		}
+		return '';
 	}
 
-	destroy() {
-		this.eventBus.detachAll();
+	private createIframe({ iframeUrl, width, height, name }: CreateIframeArgs): HTMLIFrameElement {
+		const el = document.createElement('iframe');
+		el.setAttribute('name', name);
+		el.setAttribute('src', iframeUrl);
+		el.setAttribute('width', width || '100%');
+		el.setAttribute('height', height || '100%');
+		el.setAttribute('frameborder', '0');
+		el.setAttribute('style', 'min-width:320px;min-height:320px;display:block;');
+		return el;
 	}
+
+	private handleMessage = <K extends IncomingMessageKind>({ data }: MessageEvent<Message<K>>) => {
+		this.eventBus.emit(data.kind, null, data);
+	};
 }
